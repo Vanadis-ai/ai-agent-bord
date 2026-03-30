@@ -87,6 +87,7 @@ class BordAPI:
         opts = ClaudeAgentOptions(model="sonnet")
         if is_resume:
             opts.resume = session_id
+            opts.continue_conversation = True
             if cwd:
                 opts.cwd = cwd
         else:
