@@ -105,7 +105,6 @@ class BordAPI:
                         if isinstance(block, TextBlock):
                             if "prompt is too long" in block.text.lower() and is_resume:
                                 logger.info("Prompt too long, auto-compacting")
-                                self._emit("assistant_text", {"text": "Context too large, compacting...\n", "session_id": sid})
                                 await self._auto_compact_and_retry(prompt, session_id, cwd, bypass, model)
                                 return
                             self._emit("assistant_text", {"text": block.text, "session_id": sid})
