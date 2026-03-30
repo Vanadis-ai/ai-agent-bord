@@ -34,7 +34,22 @@ body {
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
+  transition: width 0.2s, min-width 0.2s;
 }
+#sidebar.collapsed {
+  width: 0;
+  min-width: 0;
+  overflow: hidden;
+  border-right: none;
+}
+#sidebar-header .toggle-btn {
+  cursor: pointer;
+  color: var(--text-dim);
+  font-size: 16px;
+  float: right;
+  line-height: 1;
+}
+#sidebar-header .toggle-btn:hover { color: var(--text); }
 #sidebar-header {
   padding: 16px 20px;
   border-bottom: 1px solid var(--border);
@@ -216,7 +231,7 @@ body {
   font-family: inherit;
   resize: none;
   outline: none;
-  min-height: 42px;
+  min-height: 80px;
   max-height: 200px;
   line-height: 1.4;
 }

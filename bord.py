@@ -69,27 +69,9 @@ class BordAPI:
             result = []
             for m in msgs:
                 msg = m.message
-                if isinstance(msg, (UserMessage, AssistantMessage)):
-                    blocks = []
-                    for b in msg.content:
-                        if isinstance(b, TextBlock):
-                            blocks.append({"type": "text", "text": b.text})
-                        elif isinstance(b, ToolUseBlock):
-                            blocks.append({
-                                "type": "tool_use",
-                                "id": b.id,
-                                "name": b.name,
-                                "input": b.input if isinstance(b.input, dict) else str(b.input),
-                            })
-                        elif isinstance(b, ToolResultBlock):
-                            content = _extract_content(b.content)
-                            blocks.append({
-                                "type": "tool_result",
-                                "tool_use_id": b.tool_use_id,
-                                "content": content[:2000],
-                                "is_error": b.is_error,
-                            })
-                    role = "user" if isinstance(msg, UserMessage) else "assistant"
+                blocks = []
+                role = _parse_message(msg, blocks)
+                if role and blocks:
                     result.append({"role": role, "blocks": blocks})
             return result
         except Exception:
@@ -146,6 +128,15 @@ class BordAPI:
             payload = json.dumps({"type": event_type, "data": data})
             self.window.evaluate_js(f"window.onBordEvent({payload})")
 
+    def pick_directory(self) -> str | None:
+        result = self.window.create_file_dialog(
+            webview.FOLDER_DIALOG,
+            directory=os.path.expanduser("~"),
+        )
+        if result and len(result) > 0:
+            return result[0]
+        return None
+
     def rename(self, session_id, new_name):
         try:
             rename_session(session_id, new_name)
@@ -153,6 +144,59 @@ class BordAPI:
         except Exception:
             logger.exception("Failed to rename session %s", session_id)
             return {"error": "Failed to rename"}
+
+
+def _parse_message(msg: object, blocks: list) -> str | None:
+    """Parse message into blocks list. Handles both typed SDK objects and raw dicts."""
+    if isinstance(msg, (UserMessage, AssistantMessage)):
+        role = "user" if isinstance(msg, UserMessage) else "assistant"
+        for b in msg.content:
+            _parse_block(b, blocks)
+        return role
+    if isinstance(msg, dict):
+        role = msg.get("role", "")
+        if role not in ("user", "assistant"):
+            return None
+        content = msg.get("content", [])
+        if isinstance(content, str):
+            blocks.append({"type": "text", "text": content})
+            return role
+        if isinstance(content, list):
+            for b in content:
+                _parse_block(b, blocks)
+        return role
+    return None
+
+
+def _parse_block(b: object, blocks: list) -> None:
+    """Parse a single content block (typed or dict) into blocks list."""
+    if isinstance(b, TextBlock):
+        blocks.append({"type": "text", "text": b.text})
+    elif isinstance(b, ToolUseBlock):
+        blocks.append({
+            "type": "tool_use", "id": b.id, "name": b.name,
+            "input": b.input if isinstance(b.input, dict) else str(b.input),
+        })
+    elif isinstance(b, ToolResultBlock):
+        blocks.append({
+            "type": "tool_result", "tool_use_id": b.tool_use_id,
+            "content": _extract_content(b.content)[:2000], "is_error": b.is_error,
+        })
+    elif isinstance(b, dict):
+        btype = b.get("type", "")
+        if btype == "text":
+            blocks.append({"type": "text", "text": b.get("text", "")})
+        elif btype == "tool_use":
+            blocks.append({
+                "type": "tool_use", "id": b.get("id", ""),
+                "name": b.get("name", ""), "input": b.get("input", {}),
+            })
+        elif btype == "tool_result":
+            blocks.append({
+                "type": "tool_result", "tool_use_id": b.get("tool_use_id", ""),
+                "content": _extract_content(b.get("content", ""))[:2000],
+                "is_error": b.get("is_error", False),
+            })
 
 
 def _extract_content(content):

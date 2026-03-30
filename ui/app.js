@@ -228,6 +228,13 @@ const bord = {
 
   togglePanel() { document.getElementById("tool-panel").classList.toggle("collapsed"); },
 
+  toggleSidebar() {
+    const sb = document.getElementById("sidebar");
+    sb.classList.toggle("collapsed");
+    const btn = document.getElementById("show-sidebar-btn");
+    btn.style.display = sb.classList.contains("collapsed") ? "" : "none";
+  },
+
   handleKey(e) { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); this.sendMessage(); } },
 
   autoResize(el) { el.style.height = "auto"; el.style.height = Math.min(el.scrollHeight, 200) + "px"; },
@@ -258,8 +265,11 @@ const bord = {
     await pywebview.api.send_message(text, tab.id.startsWith("new-") ? null : tab.id, tab.cwd, tab.bypass);
   },
 
-  newSession() {
-    this.openTabs.push({id: "new-" + Date.now(), title: "New Session", messages: [], toolEntries: [], bypass: false, cwd: null});
+  async newSession() {
+    const cwd = await pywebview.api.pick_directory();
+    if (!cwd) return;
+    const dirName = cwd.split("/").pop() || cwd;
+    this.openTabs.push({id: "new-" + Date.now(), title: dirName, messages: [], toolEntries: [], bypass: false, cwd: cwd});
     this.switchTab(this.openTabs.length - 1);
     document.getElementById("msg-input").focus();
   },

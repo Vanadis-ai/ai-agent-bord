@@ -9,14 +9,14 @@
 
 <div id="sidebar">
   <div id="sidebar-header">
-    <h1>Vanadis <span>Bord</span></h1>
+    <h1>Vanadis <span>Bord</span> <span class="toggle-btn" onclick="bord.toggleSidebar()">&#x25C0;</span></h1>
   </div>
   <div id="sessions-list"></div>
   <div id="new-session" onclick="bord.newSession()">+ New Session</div>
 </div>
 
 <div id="main">
-  <div id="tabs"></div>
+  <div id="tabs"><span id="show-sidebar-btn" class="tab" style="display:none" onclick="bord.toggleSidebar()">&#x2630;</span></div>
   <div id="content">
     <div id="chat-area">
       <div id="messages">
@@ -27,7 +27,7 @@
       </div>
       <div id="input-area">
         <span class="bypass-toggle" onclick="bord.toggleBypass()" title="Bypass permissions">BP</span>
-        <textarea id="msg-input" placeholder="Type a message..." rows="1"
+        <textarea id="msg-input" placeholder="Type a message..." rows="3"
           onkeydown="bord.handleKey(event)" oninput="bord.autoResize(this)"></textarea>
         <button id="send-btn" onclick="bord.sendMessage()">Send</button>
       </div>
