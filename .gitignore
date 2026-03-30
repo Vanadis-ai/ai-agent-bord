@@ -1,0 +1,5 @@
+dist/
+build/
+assets/icon.iconset/
+__pycache__/
+*.pyc
