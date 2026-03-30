@@ -54,6 +54,11 @@ const bord = {
   },
 
   switchTab(idx) {
+    // Save current tab's input
+    const input = document.getElementById("msg-input");
+    if (this.activeTabIdx >= 0 && this.openTabs[this.activeTabIdx] && input) {
+      this.openTabs[this.activeTabIdx].draft = input.value;
+    }
     this.activeTabIdx = idx;
     this.renderTabs();
     this.renderChatHeader();
@@ -62,6 +67,11 @@ const bord = {
     this.renderSessions();
     this.updateBypassUI();
     this.saveOpenTabs();
+    // Restore new tab's input
+    if (input && this.openTabs[idx]) {
+      input.value = this.openTabs[idx].draft || "";
+      this.autoResize(input);
+    }
   },
 
   refreshTabTitle() {

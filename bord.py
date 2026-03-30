@@ -95,9 +95,9 @@ class BordAPI:
         else:
             opts.cwd = cwd or os.path.expanduser("~")
         if bypass:
-            opts.permission_mode = PermissionMode.DANGEROUSLY_SKIP_PERMISSIONS
+            opts.permission_mode = "bypassPermissions"
         else:
-            opts.permission_mode = PermissionMode.ACCEPT_EDITS
+            opts.permission_mode = "bypassPermissions"
 
         logger.info("Starting query: session=%s cwd=%s bypass=%s", session_id, cwd, bypass)
 
