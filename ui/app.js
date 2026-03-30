@@ -55,10 +55,24 @@ const bord = {
   switchTab(idx) {
     this.activeTabIdx = idx;
     this.renderTabs();
+    this.renderChatHeader();
     this.renderChat();
     this.renderToolPanel();
     this.renderSessions();
     this.updateBypassUI();
+  },
+
+  renderChatHeader() {
+    const titleEl = document.getElementById("chat-title");
+    const pathEl = document.getElementById("chat-path");
+    if (this.activeTabIdx < 0 || !this.openTabs[this.activeTabIdx]) {
+      titleEl.textContent = "";
+      pathEl.textContent = "";
+      return;
+    }
+    const tab = this.openTabs[this.activeTabIdx];
+    titleEl.textContent = tab.title || "";
+    pathEl.textContent = tab.cwd || "";
   },
 
   closeTab(idx, e) {
