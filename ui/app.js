@@ -219,6 +219,8 @@ const bord = {
   },
 
   scrollToTool(id) {
+    const panel = document.getElementById("tool-panel");
+    if (panel.classList.contains("collapsed")) panel.classList.remove("collapsed");
     const el = document.getElementById("tool-" + id);
     if (!el) return;
     el.scrollIntoView({behavior: "smooth"});

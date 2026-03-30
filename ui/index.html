@@ -27,6 +27,7 @@
       </div>
       <div id="input-area">
         <span class="bypass-toggle" onclick="bord.toggleBypass()" title="Bypass permissions">BP</span>
+        <span class="bypass-toggle" onclick="bord.togglePanel()" title="Toggle tool panel">T</span>
         <textarea id="msg-input" placeholder="Type a message..." rows="3"
           onkeydown="bord.handleKey(event)" oninput="bord.autoResize(this)"></textarea>
         <button id="send-btn" onclick="bord.sendMessage()">Send</button>
