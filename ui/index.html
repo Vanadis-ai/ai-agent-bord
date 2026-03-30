@@ -16,7 +16,28 @@
 </div>
 
 <div id="main">
-  <div id="tabs"><span id="show-sidebar-btn" class="tab" style="display:none" onclick="bord.toggleSidebar()">&#x2630;</span></div>
+  <div id="tabs">
+    <span id="show-sidebar-btn" class="tab" style="display:none" onclick="bord.toggleSidebar()">&#x2630;</span>
+    <div id="tab-list"></div>
+    <div id="toolbar">
+      <select id="model-select" onchange="bord.setModel(this.value)" title="Model">
+        <option value="opus">Opus</option>
+        <option value="sonnet" selected>Sonnet</option>
+        <option value="haiku">Haiku</option>
+      </select>
+      <select id="theme-select" onchange="bord.setTheme(this.value)" title="Theme">
+        <option value="dark">Dark</option>
+        <option value="light">Light</option>
+        <option value="blue">Blue</option>
+        <option value="sand">Sand</option>
+        <option value="dark-sand">Dark Sand</option>
+      </select>
+      <span class="toolbar-btn" onclick="bord.changeFontSize(-1)" title="Decrease font">A-</span>
+      <span class="toolbar-btn" onclick="bord.changeFontSize(1)" title="Increase font">A+</span>
+      <span class="toolbar-btn" id="bp-btn" onclick="bord.toggleBypass()" title="Bypass permissions">BP</span>
+      <span class="toolbar-btn" onclick="bord.togglePanel()" title="Toggle tool panel">T</span>
+    </div>
+  </div>
   <div id="content">
     <div id="chat-area">
       <div id="messages">
@@ -26,24 +47,6 @@
         </div>
       </div>
       <div id="input-area">
-        <select id="model-select" onchange="bord.setModel(this.value)" title="Model">
-          <option value="opus">Opus</option>
-          <option value="sonnet" selected>Sonnet</option>
-          <option value="haiku">Haiku</option>
-        </select>
-        <select id="theme-select" onchange="bord.setTheme(this.value)" title="Theme">
-          <option value="dark">Dark</option>
-          <option value="light">Light</option>
-          <option value="blue">Blue</option>
-          <option value="sand">Sand</option>
-          <option value="dark-sand">Dark Sand</option>
-        </select>
-        <span class="font-controls">
-          <span class="bypass-toggle" onclick="bord.changeFontSize(-1)" title="Decrease font">A-</span>
-          <span class="bypass-toggle" onclick="bord.changeFontSize(1)" title="Increase font">A+</span>
-        </span>
-        <span class="bypass-toggle" onclick="bord.toggleBypass()" title="Bypass permissions">BP</span>
-        <span class="bypass-toggle" onclick="bord.togglePanel()" title="Toggle tool panel">T</span>
         <textarea id="msg-input" placeholder="Type a message..." rows="3"
           onkeydown="bord.handleKey(event)" oninput="bord.autoResize(this)"></textarea>
         <button id="send-btn" onclick="bord.sendMessage()">Send</button>

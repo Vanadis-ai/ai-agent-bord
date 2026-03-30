@@ -72,7 +72,7 @@ const bord = {
   },
 
   renderTabs() {
-    const el = document.getElementById("tabs");
+    const el = document.getElementById("tab-list");
     el.textContent = "";
     this.openTabs.forEach((t, i) => {
       const div = document.createElement("div");
@@ -278,7 +278,7 @@ const bord = {
   },
 
   updateBypassUI() {
-    const el = document.querySelector(".bypass-toggle");
+    const el = document.getElementById("bp-btn");
     const tab = this.openTabs[this.activeTabIdx];
     if (el && tab) el.classList.toggle("active", tab.bypass);
   },

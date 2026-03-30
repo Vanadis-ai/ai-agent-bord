@@ -203,14 +203,37 @@ body {
   min-width: 0;
 }
 
-/* Tabs */
+/* Tabs + Toolbar */
 #tabs {
   display: flex;
   background: var(--sidebar-bg);
   border-bottom: 1px solid var(--border);
   min-height: 38px;
-  overflow-x: auto;
+  align-items: center;
 }
+#tab-list {
+  display: flex;
+  flex: 1;
+  overflow-x: auto;
+  min-width: 0;
+}
+#toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  flex-shrink: 0;
+}
+.toolbar-btn {
+  font-size: 11px;
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  user-select: none;
+}
+.toolbar-btn:hover { background: rgba(107, 124, 206, 0.15); color: var(--text); }
+.toolbar-btn.active { color: var(--error); background: rgba(224, 96, 96, 0.15); }
 .tab {
   padding: 8px 16px;
   font-size: 12px;
@@ -364,16 +387,6 @@ body {
 }
 #model-select:focus, #theme-select:focus { border-color: var(--accent); }
 #model-select option, #theme-select option { background: var(--sidebar-bg); color: var(--text); }
-.font-controls { display: inline-flex; gap: 2px; }
-.bypass-toggle {
-  font-size: 11px;
-  color: var(--text-dim);
-  cursor: pointer;
-  padding: 6px 10px;
-  border-radius: 4px;
-  user-select: none;
-}
-.bypass-toggle.active { color: var(--error); background: rgba(224, 96, 96, 0.15); }
 
 /* Tool panel */
 #tool-panel {
