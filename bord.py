@@ -83,12 +83,14 @@ class BordAPI:
         return {"status": "started"}
 
     async def _stream_query(self, prompt, session_id=None, cwd=None, bypass=False):
-        opts = ClaudeAgentOptions(
-            cwd=cwd or os.path.expanduser("~"),
-            model="sonnet",
-        )
-        if session_id and not session_id.startswith("new-"):
+        is_resume = session_id and not session_id.startswith("new-")
+        opts = ClaudeAgentOptions(model="sonnet")
+        if is_resume:
             opts.resume = session_id
+            if cwd:
+                opts.cwd = cwd
+        else:
+            opts.cwd = cwd or os.path.expanduser("~")
         if bypass:
             opts.permission_mode = PermissionMode.DANGEROUSLY_SKIP_PERMISSIONS
 
@@ -119,9 +121,9 @@ class BordAPI:
                     cost = getattr(msg, "cost_usd", 0)
                     self._emit("result", {"session_id": sid, "cost": cost})
                     logger.info("Query completed: session=%s cost=%s", sid, cost)
-        except Exception:
+        except Exception as e:
             logger.exception("Query failed")
-            self._emit("error", {"message": "Query failed"})
+            self._emit("error", {"message": str(e)})
 
     def _emit(self, event_type, data):
         if self.window:

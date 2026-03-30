@@ -34,15 +34,15 @@ const bord = {
         span.textContent = s.cwd;
         div.appendChild(span);
       }
-      div.addEventListener("click", () => this.openSession(s.id, title));
+      div.addEventListener("click", () => this.openSession(s.id, title, s.cwd));
       el.appendChild(div);
     });
   },
 
-  openSession(id, title) {
+  openSession(id, title, cwd) {
     let idx = this.openTabs.findIndex(t => t.id === id);
     if (idx === -1) {
-      this.openTabs.push({id, title, messages: null, toolEntries: [], bypass: false, cwd: null});
+      this.openTabs.push({id, title, messages: null, toolEntries: [], bypass: false, cwd: cwd || null});
       idx = this.openTabs.length - 1;
     }
     this.switchTab(idx);
