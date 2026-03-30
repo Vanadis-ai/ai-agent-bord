@@ -78,13 +78,13 @@ class BordAPI:
             logger.exception("Failed to get messages for session %s", session_id)
             return {"error": "Failed to get messages"}
 
-    def send_message(self, prompt, session_id=None, cwd=None, bypass=False):
-        self._run_async(self._stream_query(prompt, session_id, cwd, bypass))
+    def send_message(self, prompt, session_id=None, cwd=None, bypass=False, model="sonnet"):
+        self._run_async(self._stream_query(prompt, session_id, cwd, bypass, model))
         return {"status": "started"}
 
-    async def _stream_query(self, prompt, session_id=None, cwd=None, bypass=False):
+    async def _stream_query(self, prompt, session_id=None, cwd=None, bypass=False, model="sonnet"):
         is_resume = session_id and not session_id.startswith("new-")
-        opts = ClaudeAgentOptions(model="sonnet")
+        opts = ClaudeAgentOptions(model=model or "sonnet")
         if is_resume:
             opts.resume = session_id
             opts.continue_conversation = True
@@ -103,6 +103,11 @@ class BordAPI:
                     sid = getattr(msg, "session_id", "")
                     for block in msg.content:
                         if isinstance(block, TextBlock):
+                            if "prompt is too long" in block.text.lower() and is_resume:
+                                logger.info("Prompt too long, auto-compacting")
+                                self._emit("assistant_text", {"text": "Context too large, compacting...\n", "session_id": sid})
+                                await self._auto_compact_and_retry(prompt, session_id, cwd, bypass, model)
+                                return
                             self._emit("assistant_text", {"text": block.text, "session_id": sid})
                         elif isinstance(block, ToolUseBlock):
                             self._emit("tool_use", {
@@ -125,12 +130,33 @@ class BordAPI:
         except Exception as e:
             err_msg = str(e)
             logger.exception("Query failed: %s", err_msg)
-            if "too long" in err_msg.lower():
-                self._emit("error", {"message": "Session context is too long. Try starting a new session."})
-            elif "exit code 1" in err_msg.lower():
-                self._emit("error", {"message": f"Claude Code error: {err_msg}"})
-            else:
-                self._emit("error", {"message": err_msg})
+            self._emit("error", {"message": err_msg})
+
+    async def _auto_compact_and_retry(self, prompt, session_id, cwd, bypass, model):
+        """Compact the session and retry the query."""
+        logger.info("Auto-compacting session %s", session_id)
+        self._emit("assistant_text", {"text": "Compacting session context...\n", "session_id": session_id})
+
+        compact_opts = ClaudeAgentOptions(
+            resume=session_id,
+            continue_conversation=True,
+            model=model or "sonnet",
+        )
+        if cwd:
+            compact_opts.cwd = cwd
+
+        try:
+            async for msg in query(prompt="/compact", options=compact_opts):
+                if isinstance(msg, AssistantMessage):
+                    for block in msg.content:
+                        if isinstance(block, TextBlock) and "error" in block.text.lower():
+                            self._emit("error", {"message": f"Compact failed: {block.text}"})
+                            return
+            logger.info("Compact done, retrying query")
+            await self._stream_query(prompt, session_id, cwd, bypass, model)
+        except Exception as e:
+            logger.exception("Compact failed")
+            self._emit("error", {"message": f"Compact failed: {e}"})
 
     def _emit(self, event_type, data):
         if self.window:

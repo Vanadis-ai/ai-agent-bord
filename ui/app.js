@@ -7,6 +7,7 @@ const bord = {
   activeTabIdx: -1,
   isStreaming: false,
   currentStreamText: "",
+  model: "sonnet",
 
   async init() {
     await this.loadSessions();
@@ -230,6 +231,8 @@ const bord = {
 
   togglePanel() { document.getElementById("tool-panel").classList.toggle("collapsed"); },
 
+  setModel(m) { this.model = m; },
+
   toggleSidebar() {
     const sb = document.getElementById("sidebar");
     sb.classList.toggle("collapsed");
@@ -264,7 +267,7 @@ const bord = {
     this.isStreaming = true; this.currentStreamText = "";
     document.getElementById("send-btn").disabled = true;
     this.renderChat();
-    await pywebview.api.send_message(text, tab.id.startsWith("new-") ? null : tab.id, tab.cwd, tab.bypass);
+    await pywebview.api.send_message(text, tab.id.startsWith("new-") ? null : tab.id, tab.cwd, tab.bypass, this.model);
   },
 
   async newSession() {

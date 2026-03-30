@@ -267,6 +267,18 @@ body {
 }
 #send-btn:hover { background: var(--accent-hover); }
 #send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+#model-select {
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-dim);
+  font-size: 11px;
+  padding: 4px 6px;
+  outline: none;
+  cursor: pointer;
+}
+#model-select:focus { border-color: var(--accent); }
+#model-select option { background: var(--sidebar-bg); color: var(--text); }
 .bypass-toggle {
   font-size: 11px;
   color: var(--text-dim);

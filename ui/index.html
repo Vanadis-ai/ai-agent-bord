@@ -26,6 +26,11 @@
         </div>
       </div>
       <div id="input-area">
+        <select id="model-select" onchange="bord.setModel(this.value)" title="Model">
+          <option value="opus">Opus</option>
+          <option value="sonnet" selected>Sonnet</option>
+          <option value="haiku">Haiku</option>
+        </select>
         <span class="bypass-toggle" onclick="bord.toggleBypass()" title="Bypass permissions">BP</span>
         <span class="bypass-toggle" onclick="bord.togglePanel()" title="Toggle tool panel">T</span>
         <textarea id="msg-input" placeholder="Type a message..." rows="3"
