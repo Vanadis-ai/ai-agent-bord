@@ -122,8 +122,14 @@ class BordAPI:
                     self._emit("result", {"session_id": sid, "cost": cost})
                     logger.info("Query completed: session=%s cost=%s", sid, cost)
         except Exception as e:
-            logger.exception("Query failed")
-            self._emit("error", {"message": str(e)})
+            err_msg = str(e)
+            logger.exception("Query failed: %s", err_msg)
+            if "too long" in err_msg.lower():
+                self._emit("error", {"message": "Session context is too long. Try starting a new session."})
+            elif "exit code 1" in err_msg.lower():
+                self._emit("error", {"message": f"Claude Code error: {err_msg}"})
+            else:
+                self._emit("error", {"message": err_msg})
 
     def _emit(self, event_type, data):
         if self.window:
