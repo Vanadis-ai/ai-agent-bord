@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Vanadis Bord</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="sidebar">
+  <div id="sidebar-header">
+    <h1>Vanadis <span>Bord</span></h1>
+  </div>
+  <div id="sessions-list"></div>
+  <div id="new-session" onclick="bord.newSession()">+ New Session</div>
+</div>
+
+<div id="main">
+  <div id="tabs"></div>
+  <div id="content">
+    <div id="chat-area">
+      <div id="messages">
+        <div class="welcome-screen">
+          <h2>Vanadis Bord</h2>
+          <p>Select a session or create a new one</p>
+        </div>
+      </div>
+      <div id="input-area">
+        <span class="bypass-toggle" onclick="bord.toggleBypass()" title="Bypass permissions">BP</span>
+        <textarea id="msg-input" placeholder="Type a message..." rows="1"
+          onkeydown="bord.handleKey(event)" oninput="bord.autoResize(this)"></textarea>
+        <button id="send-btn" onclick="bord.sendMessage()">Send</button>
+      </div>
+    </div>
+    <div id="tool-panel">
+      <div id="tool-panel-header">
+        <span>Tool Activity</span>
+        <span class="collapse-btn" onclick="bord.togglePanel()">&#x2715;</span>
+      </div>
+      <div id="tool-entries"></div>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

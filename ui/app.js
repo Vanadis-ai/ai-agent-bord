@@ -1,0 +1,296 @@
+/* Vanadis Bord -- frontend logic */
+/* global pywebview */
+
+const bord = {
+  sessions: [],
+  openTabs: [],
+  activeTabIdx: -1,
+  isStreaming: false,
+  currentStreamText: "",
+
+  async init() {
+    await this.loadSessions();
+  },
+
+  async loadSessions() {
+    const result = await pywebview.api.get_sessions();
+    if (result.error) { console.error(result.error); return; }
+    this.sessions = result;
+    this.renderSessions();
+  },
+
+  renderSessions() {
+    const el = document.getElementById("sessions-list");
+    const activeId = this.openTabs[this.activeTabIdx]?.id;
+    el.textContent = "";
+    this.sessions.forEach(s => {
+      const div = document.createElement("div");
+      div.className = "session-item" + (s.id === activeId ? " active" : "");
+      const title = (s.title || "Untitled").substring(0, 40);
+      div.appendChild(document.createTextNode(title));
+      if (s.cwd) {
+        const span = document.createElement("span");
+        span.className = "time";
+        span.textContent = s.cwd;
+        div.appendChild(span);
+      }
+      div.addEventListener("click", () => this.openSession(s.id, title));
+      el.appendChild(div);
+    });
+  },
+
+  openSession(id, title) {
+    let idx = this.openTabs.findIndex(t => t.id === id);
+    if (idx === -1) {
+      this.openTabs.push({id, title, messages: null, toolEntries: [], bypass: false, cwd: null});
+      idx = this.openTabs.length - 1;
+    }
+    this.switchTab(idx);
+    if (this.openTabs[idx].messages === null) this.loadMessages(id, idx);
+  },
+
+  switchTab(idx) {
+    this.activeTabIdx = idx;
+    this.renderTabs();
+    this.renderChat();
+    this.renderToolPanel();
+    this.renderSessions();
+    this.updateBypassUI();
+  },
+
+  closeTab(idx, e) {
+    if (e) e.stopPropagation();
+    this.openTabs.splice(idx, 1);
+    if (this.activeTabIdx >= this.openTabs.length) this.activeTabIdx = this.openTabs.length - 1;
+    if (this.activeTabIdx < 0) this.activeTabIdx = -1;
+    this.renderTabs();
+    this.renderChat();
+    this.renderToolPanel();
+  },
+
+  renderTabs() {
+    const el = document.getElementById("tabs");
+    el.textContent = "";
+    this.openTabs.forEach((t, i) => {
+      const div = document.createElement("div");
+      div.className = "tab" + (i === this.activeTabIdx ? " active" : "");
+      div.addEventListener("click", () => this.switchTab(i));
+      const badge = document.createElement("span");
+      badge.className = "badge";
+      div.appendChild(badge);
+      div.appendChild(document.createTextNode(t.title.substring(0, 25)));
+      const close = document.createElement("span");
+      close.className = "close";
+      close.textContent = "\u2715";
+      close.addEventListener("click", (ev) => this.closeTab(i, ev));
+      div.appendChild(close);
+      el.appendChild(div);
+    });
+  },
+
+  async loadMessages(sessionId, tabIdx) {
+    const result = await pywebview.api.get_messages(sessionId);
+    if (result.error) { console.error(result.error); return; }
+    const tab = this.openTabs[tabIdx];
+    tab.messages = result;
+    tab.toolEntries = [];
+    result.forEach(m => {
+      m.blocks.forEach(b => {
+        if (b.type === "tool_use") tab.toolEntries.push({type: "use", name: b.name, input: b.input, id: b.id});
+        else if (b.type === "tool_result") tab.toolEntries.push({type: "result", content: b.content, is_error: b.is_error, tool_use_id: b.tool_use_id});
+      });
+    });
+    if (tabIdx === this.activeTabIdx) { this.renderChat(); this.renderToolPanel(); }
+  },
+
+  renderChat() {
+    const el = document.getElementById("messages");
+    el.textContent = "";
+    if (this.activeTabIdx < 0 || !this.openTabs[this.activeTabIdx]) {
+      const w = document.createElement("div"); w.className = "welcome-screen";
+      const h = document.createElement("h2"); h.textContent = "Vanadis Bord";
+      const p = document.createElement("p"); p.textContent = "Select a session or create a new one";
+      w.appendChild(h); w.appendChild(p); el.appendChild(w); return;
+    }
+    const tab = this.openTabs[this.activeTabIdx];
+    if (!tab.messages) {
+      const w = document.createElement("div"); w.className = "welcome-screen";
+      const p = document.createElement("p"); p.textContent = "Loading...";
+      w.appendChild(p); el.appendChild(w); return;
+    }
+    tab.messages.forEach(m => {
+      const div = document.createElement("div");
+      div.className = "msg " + m.role;
+      m.blocks.forEach(b => {
+        if (b.type === "text") div.appendChild(this._renderMarkdown(b.text));
+        else if (b.type === "tool_use") {
+          const ind = document.createElement("div"); ind.className = "tool-indicator";
+          const icon = document.createElement("span"); icon.className = "icon"; icon.textContent = "\u2699";
+          ind.appendChild(icon);
+          ind.appendChild(document.createTextNode(" " + this._toolLabel(b.name, b.input)));
+          ind.addEventListener("click", () => this.scrollToTool(b.id));
+          div.appendChild(ind);
+        }
+      });
+      if (div.childNodes.length > 0) el.appendChild(div);
+    });
+    if (this.isStreaming && this.currentStreamText) {
+      const div = document.createElement("div"); div.className = "msg assistant";
+      div.appendChild(this._renderMarkdown(this.currentStreamText));
+      el.appendChild(div);
+    }
+    el.scrollTop = el.scrollHeight;
+  },
+
+  _toolLabel(name, input) {
+    if (!input || typeof input !== "object") return name;
+    if (["Read","Edit","Write"].includes(name) && input.file_path) return name + " " + input.file_path.split("/").pop();
+    if (name === "Bash" && input.command) return "$ " + input.command.substring(0, 50);
+    if (name === "Grep" && input.pattern) return "Grep " + input.pattern.substring(0, 30);
+    if (name === "Glob" && input.pattern) return "Glob " + input.pattern.substring(0, 30);
+    return name;
+  },
+
+  _renderMarkdown(text) {
+    const container = document.createElement("div");
+    text.split(/(```[\s\S]*?```)/g).forEach(part => {
+      if (part.startsWith("```")) {
+        const pre = document.createElement("pre");
+        const code = document.createElement("code");
+        code.textContent = part.replace(/^```\w*\n?/, "").replace(/```$/, "");
+        pre.appendChild(code); container.appendChild(pre);
+      } else {
+        part.split("\n\n").forEach(block => {
+          if (!block.trim()) return;
+          const p = document.createElement("p");
+          p.appendChild(this._parseInline(block));
+          container.appendChild(p);
+        });
+      }
+    });
+    return container;
+  },
+
+  _parseInline(text) {
+    const frag = document.createDocumentFragment();
+    const re = /(`[^`]+`|\*\*[^*]+\*\*|\n)/g;
+    let last = 0, m;
+    while ((m = re.exec(text)) !== null) {
+      if (m.index > last) frag.appendChild(document.createTextNode(text.slice(last, m.index)));
+      const tok = m[0];
+      if (tok === "\n") frag.appendChild(document.createElement("br"));
+      else if (tok.startsWith("`")) { const c = document.createElement("code"); c.textContent = tok.slice(1,-1); frag.appendChild(c); }
+      else if (tok.startsWith("**")) { const s = document.createElement("strong"); s.textContent = tok.slice(2,-2); frag.appendChild(s); }
+      last = m.index + tok.length;
+    }
+    if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+    return frag;
+  },
+
+  renderToolPanel() {
+    const el = document.getElementById("tool-entries");
+    el.textContent = "";
+    if (this.activeTabIdx < 0 || !this.openTabs[this.activeTabIdx]) return;
+    this.openTabs[this.activeTabIdx].toolEntries.forEach(e => {
+      const entry = document.createElement("div"); entry.className = "tool-entry";
+      if (e.id) entry.id = "tool-" + e.id;
+      const header = document.createElement("div"); header.className = "tool-entry-header";
+      const body = document.createElement("div"); body.className = "tool-entry-body";
+      header.addEventListener("click", () => { header.classList.toggle("expanded"); body.classList.toggle("visible"); });
+      const arrow = document.createElement("span"); arrow.className = "arrow"; arrow.textContent = "\u25B6";
+      header.appendChild(arrow);
+      if (e.type === "use") {
+        const ns = document.createElement("span"); ns.className = "name"; ns.textContent = " " + e.name + " ";
+        header.appendChild(ns);
+        header.appendChild(document.createTextNode(this._toolLabel(e.name, e.input)));
+        const pre = document.createElement("pre");
+        pre.textContent = typeof e.input === "object" ? JSON.stringify(e.input, null, 2) : String(e.input || "");
+        body.appendChild(pre);
+      } else {
+        header.appendChild(document.createTextNode(e.is_error ? " Error" : " Result"));
+        const pre = document.createElement("pre");
+        if (e.is_error) pre.className = "error";
+        pre.textContent = e.content || "";
+        body.appendChild(pre);
+      }
+      entry.appendChild(header); entry.appendChild(body); el.appendChild(entry);
+    });
+    el.scrollTop = el.scrollHeight;
+  },
+
+  scrollToTool(id) {
+    const el = document.getElementById("tool-" + id);
+    if (!el) return;
+    el.scrollIntoView({behavior: "smooth"});
+    const h = el.querySelector(".tool-entry-header"), b = el.querySelector(".tool-entry-body");
+    if (h && b) { h.classList.add("expanded"); b.classList.add("visible"); }
+  },
+
+  togglePanel() { document.getElementById("tool-panel").classList.toggle("collapsed"); },
+
+  handleKey(e) { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); this.sendMessage(); } },
+
+  autoResize(el) { el.style.height = "auto"; el.style.height = Math.min(el.scrollHeight, 200) + "px"; },
+
+  toggleBypass() {
+    if (this.activeTabIdx < 0) return;
+    this.openTabs[this.activeTabIdx].bypass = !this.openTabs[this.activeTabIdx].bypass;
+    this.updateBypassUI();
+  },
+
+  updateBypassUI() {
+    const el = document.querySelector(".bypass-toggle");
+    const tab = this.openTabs[this.activeTabIdx];
+    if (el && tab) el.classList.toggle("active", tab.bypass);
+  },
+
+  async sendMessage() {
+    const input = document.getElementById("msg-input");
+    const text = input.value.trim();
+    if (!text || this.isStreaming || this.activeTabIdx < 0) return;
+    const tab = this.openTabs[this.activeTabIdx];
+    if (!tab.messages) tab.messages = [];
+    tab.messages.push({role: "user", blocks: [{type: "text", text}]});
+    input.value = ""; this.autoResize(input);
+    this.isStreaming = true; this.currentStreamText = "";
+    document.getElementById("send-btn").disabled = true;
+    this.renderChat();
+    await pywebview.api.send_message(text, tab.id.startsWith("new-") ? null : tab.id, tab.cwd, tab.bypass);
+  },
+
+  newSession() {
+    this.openTabs.push({id: "new-" + Date.now(), title: "New Session", messages: [], toolEntries: [], bypass: false, cwd: null});
+    this.switchTab(this.openTabs.length - 1);
+    document.getElementById("msg-input").focus();
+  },
+};
+
+window.onBordEvent = function(evt) {
+  if (bord.activeTabIdx < 0) return;
+  const tab = bord.openTabs[bord.activeTabIdx];
+  switch (evt.type) {
+    case "assistant_text":
+      bord.currentStreamText += evt.data.text;
+      if (evt.data.session_id && tab.id.startsWith("new-")) tab.id = evt.data.session_id;
+      bord.renderChat(); break;
+    case "tool_use":
+      tab.toolEntries.push({type: "use", name: evt.data.name, input: evt.data.input, id: evt.data.id});
+      bord.renderChat(); bord.renderToolPanel(); break;
+    case "tool_result":
+      tab.toolEntries.push({type: "result", content: evt.data.content, is_error: evt.data.is_error, tool_use_id: evt.data.tool_use_id});
+      bord.renderToolPanel(); break;
+    case "result":
+      bord.isStreaming = false;
+      if (bord.currentStreamText) { tab.messages.push({role: "assistant", blocks: [{type: "text", text: bord.currentStreamText}]}); bord.currentStreamText = ""; }
+      if (evt.data.session_id && tab.id.startsWith("new-")) tab.id = evt.data.session_id;
+      document.getElementById("send-btn").disabled = false;
+      bord.renderChat(); bord.loadSessions(); break;
+    case "error":
+      bord.isStreaming = false; bord.currentStreamText = "";
+      document.getElementById("send-btn").disabled = false;
+      tab.messages.push({role: "assistant", blocks: [{type: "text", text: "Error: " + evt.data.message}]});
+      bord.renderChat(); break;
+  }
+};
+
+window.addEventListener("pywebviewready", () => bord.init());

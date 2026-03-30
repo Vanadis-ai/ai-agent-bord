@@ -1,159 +1,185 @@
 """Vanadis Bord -- desktop AI chat application."""
 
+import asyncio
+import json
+import logging
+import os
+import threading
+from pathlib import Path
+
 import webview
 
+from claude_agent_sdk import (
+    AssistantMessage,
+    ClaudeAgentOptions,
+    PermissionMode,
+    ResultMessage,
+    StreamEvent,
+    SystemMessage,
+    TextBlock,
+    ToolResultBlock,
+    ToolUseBlock,
+    UserMessage,
+    get_session_messages,
+    list_sessions,
+    query,
+    rename_session,
+)
 
-HTML = """
-<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<title>Vanadis Bord</title>
-<style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    background: #1a1a2e;
-    color: #e0e0e0;
-    height: 100vh;
-    display: flex;
-  }
-  #sidebar {
-    width: 260px;
-    background: #16213e;
-    border-right: 1px solid #2a2a4a;
-    display: flex;
-    flex-direction: column;
-    padding: 16px;
-  }
-  #sidebar h1 {
-    font-size: 18px;
-    font-weight: 600;
-    color: #7b8cde;
-    margin-bottom: 16px;
-  }
-  #sidebar h1 span { color: #4a5a9a; }
-  #sessions { flex: 1; overflow-y: auto; }
-  #sessions .session {
-    padding: 10px 12px;
-    border-radius: 8px;
-    cursor: pointer;
-    margin-bottom: 4px;
-    font-size: 13px;
-    color: #a0a0c0;
-  }
-  #sessions .session:hover { background: #1a1a3e; }
-  #sessions .session.active { background: #2a2a5e; color: #fff; }
-  #new-session-btn {
-    padding: 10px;
-    background: #2a2a5e;
-    border: 1px solid #3a3a6e;
-    border-radius: 8px;
-    color: #7b8cde;
-    cursor: pointer;
-    font-size: 13px;
-    text-align: center;
-    margin-top: 8px;
-  }
-  #new-session-btn:hover { background: #3a3a6e; }
-  #main {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-  }
-  #chat {
-    flex: 1;
-    overflow-y: auto;
-    padding: 24px;
-  }
-  #chat .message {
-    margin-bottom: 16px;
-    max-width: 80%;
-  }
-  #chat .message.user {
-    margin-left: auto;
-    background: #2a2a5e;
-    padding: 12px 16px;
-    border-radius: 12px 12px 4px 12px;
-  }
-  #chat .message.assistant {
-    background: #1e1e3a;
-    padding: 12px 16px;
-    border-radius: 12px 12px 12px 4px;
-  }
-  #chat .welcome {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    height: 100%;
-    color: #4a5a9a;
-    font-size: 24px;
-    font-weight: 300;
-  }
-  #input-area {
-    padding: 16px 24px;
-    border-top: 1px solid #2a2a4a;
-    display: flex;
-    gap: 8px;
-  }
-  #input-area textarea {
-    flex: 1;
-    background: #16213e;
-    border: 1px solid #2a2a4a;
-    border-radius: 8px;
-    color: #e0e0e0;
-    padding: 12px;
-    font-size: 14px;
-    font-family: inherit;
-    resize: none;
-    outline: none;
-    min-height: 44px;
-    max-height: 200px;
-  }
-  #input-area textarea:focus { border-color: #7b8cde; }
-  #input-area button {
-    background: #7b8cde;
-    border: none;
-    border-radius: 8px;
-    color: #fff;
-    padding: 0 20px;
-    cursor: pointer;
-    font-size: 14px;
-  }
-  #input-area button:hover { background: #8b9cee; }
-</style>
-</head>
-<body>
-  <div id="sidebar">
-    <h1>Vanadis <span>Bord</span></h1>
-    <div id="sessions">
-      <div class="session active">Welcome</div>
-    </div>
-    <div id="new-session-btn">+ New Session</div>
-  </div>
-  <div id="main">
-    <div id="chat">
-      <div class="welcome">Vanadis Bord</div>
-    </div>
-    <div id="input-area">
-      <textarea placeholder="Type a message..." rows="1"></textarea>
-      <button>Send</button>
-    </div>
-  </div>
-</body>
-</html>
-"""
+logger = logging.getLogger("bord")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(message)s")
 
 
-def main():
+class BordAPI:
+    """Python backend exposed to JS via pywebview bridge."""
+
+    def __init__(self):
+        self.window = None
+        self.loop = asyncio.new_event_loop()
+        self.thread = threading.Thread(target=self._run_loop, daemon=True)
+        self.thread.start()
+
+    def _run_loop(self):
+        asyncio.set_event_loop(self.loop)
+        self.loop.run_forever()
+
+    def _run_async(self, coro):
+        return asyncio.run_coroutine_threadsafe(coro, self.loop)
+
+    def get_sessions(self, directory=None):
+        try:
+            sessions = list_sessions(directory=directory, limit=50)
+            return [
+                {
+                    "id": s.session_id,
+                    "title": s.custom_title or s.summary or s.first_prompt or "Untitled",
+                    "last_modified": s.last_modified,
+                    "cwd": s.cwd or "",
+                    "tag": s.tag or "",
+                }
+                for s in sessions
+            ]
+        except Exception:
+            logger.exception("Failed to list sessions")
+            return {"error": "Failed to list sessions"}
+
+    def get_messages(self, session_id, directory=None):
+        try:
+            msgs = get_session_messages(session_id, directory=directory)
+            result = []
+            for m in msgs:
+                msg = m.message
+                if isinstance(msg, (UserMessage, AssistantMessage)):
+                    blocks = []
+                    for b in msg.content:
+                        if isinstance(b, TextBlock):
+                            blocks.append({"type": "text", "text": b.text})
+                        elif isinstance(b, ToolUseBlock):
+                            blocks.append({
+                                "type": "tool_use",
+                                "id": b.id,
+                                "name": b.name,
+                                "input": b.input if isinstance(b.input, dict) else str(b.input),
+                            })
+                        elif isinstance(b, ToolResultBlock):
+                            content = _extract_content(b.content)
+                            blocks.append({
+                                "type": "tool_result",
+                                "tool_use_id": b.tool_use_id,
+                                "content": content[:2000],
+                                "is_error": b.is_error,
+                            })
+                    role = "user" if isinstance(msg, UserMessage) else "assistant"
+                    result.append({"role": role, "blocks": blocks})
+            return result
+        except Exception:
+            logger.exception("Failed to get messages for session %s", session_id)
+            return {"error": "Failed to get messages"}
+
+    def send_message(self, prompt, session_id=None, cwd=None, bypass=False):
+        self._run_async(self._stream_query(prompt, session_id, cwd, bypass))
+        return {"status": "started"}
+
+    async def _stream_query(self, prompt, session_id=None, cwd=None, bypass=False):
+        opts = ClaudeAgentOptions(
+            cwd=cwd or os.path.expanduser("~"),
+            model="sonnet",
+        )
+        if session_id and not session_id.startswith("new-"):
+            opts.resume = session_id
+        if bypass:
+            opts.permission_mode = PermissionMode.DANGEROUSLY_SKIP_PERMISSIONS
+
+        logger.info("Starting query: session=%s cwd=%s bypass=%s", session_id, cwd, bypass)
+
+        try:
+            async for msg in query(prompt=prompt, options=opts):
+                if isinstance(msg, AssistantMessage):
+                    sid = getattr(msg, "session_id", "")
+                    for block in msg.content:
+                        if isinstance(block, TextBlock):
+                            self._emit("assistant_text", {"text": block.text, "session_id": sid})
+                        elif isinstance(block, ToolUseBlock):
+                            self._emit("tool_use", {
+                                "id": block.id,
+                                "name": block.name,
+                                "input": block.input if isinstance(block.input, dict) else str(block.input),
+                            })
+                        elif isinstance(block, ToolResultBlock):
+                            content = _extract_content(block.content)
+                            self._emit("tool_result", {
+                                "tool_use_id": block.tool_use_id,
+                                "content": content[:5000],
+                                "is_error": block.is_error,
+                            })
+                elif isinstance(msg, ResultMessage):
+                    sid = getattr(msg, "session_id", "")
+                    cost = getattr(msg, "cost_usd", 0)
+                    self._emit("result", {"session_id": sid, "cost": cost})
+                    logger.info("Query completed: session=%s cost=%s", sid, cost)
+        except Exception:
+            logger.exception("Query failed")
+            self._emit("error", {"message": "Query failed"})
+
+    def _emit(self, event_type, data):
+        if self.window:
+            payload = json.dumps({"type": event_type, "data": data})
+            self.window.evaluate_js(f"window.onBordEvent({payload})")
+
+    def rename(self, session_id, new_name):
+        try:
+            rename_session(session_id, new_name)
+            return {"ok": True}
+        except Exception:
+            logger.exception("Failed to rename session %s", session_id)
+            return {"error": "Failed to rename"}
+
+
+def _extract_content(content):
+    if isinstance(content, list):
+        return "\n".join(
+            bl.get("text", "") if isinstance(bl, dict) else str(bl)
+            for bl in content
+        )
+    if not isinstance(content, str):
+        return str(content)
+    return content
+
+
+def main() -> None:
+    api = BordAPI()
+    ui_dir = Path(__file__).parent / "ui"
+    index_path = ui_dir / "index.html"
     window = webview.create_window(
         "Vanadis Bord",
-        html=HTML,
-        width=1200,
-        height=800,
-        min_size=(800, 600),
+        url=str(index_path),
+        js_api=api,
+        width=1400,
+        height=900,
+        min_size=(900, 600),
     )
-    webview.start(debug=True)
+    api.window = window
+    webview.start(debug=False)
 
 
 if __name__ == "__main__":
