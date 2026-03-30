@@ -1,9 +1,11 @@
 """Vanadis Bord -- desktop AI chat application."""
 
 import asyncio
+import atexit
 import json
 import logging
 import os
+import signal
 import threading
 from pathlib import Path
 
@@ -281,7 +283,25 @@ def _extract_content(content):
     return content
 
 
+def _cleanup() -> None:
+    """Kill all child claude processes on exit."""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["pkill", "-f", "claude.*stream-json"],
+            capture_output=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            logger.info("Cleaned up child claude processes")
+    except Exception:
+        pass
+
+
 def main() -> None:
+    atexit.register(_cleanup)
+    signal.signal(signal.SIGTERM, lambda *_: (_cleanup(), os._exit(0)))
+
     api = BordAPI()
     ui_dir = Path(__file__).parent / "ui"
     index_path = ui_dir / "index.html"
@@ -295,6 +315,7 @@ def main() -> None:
     )
     api.window = window
     webview.start(debug=False)
+    _cleanup()
 
 
 if __name__ == "__main__":
