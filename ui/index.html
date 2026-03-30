@@ -31,6 +31,17 @@
           <option value="sonnet" selected>Sonnet</option>
           <option value="haiku">Haiku</option>
         </select>
+        <select id="theme-select" onchange="bord.setTheme(this.value)" title="Theme">
+          <option value="dark">Dark</option>
+          <option value="light">Light</option>
+          <option value="blue">Blue</option>
+          <option value="sand">Sand</option>
+          <option value="dark-sand">Dark Sand</option>
+        </select>
+        <span class="font-controls">
+          <span class="bypass-toggle" onclick="bord.changeFontSize(-1)" title="Decrease font">A-</span>
+          <span class="bypass-toggle" onclick="bord.changeFontSize(1)" title="Increase font">A+</span>
+        </span>
         <span class="bypass-toggle" onclick="bord.toggleBypass()" title="Bypass permissions">BP</span>
         <span class="bypass-toggle" onclick="bord.togglePanel()" title="Toggle tool panel">T</span>
         <textarea id="msg-input" placeholder="Type a message..." rows="3"

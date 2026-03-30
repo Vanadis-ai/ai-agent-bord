@@ -8,8 +8,10 @@ const bord = {
   isStreaming: false,
   currentStreamText: "",
   model: "sonnet",
+  fontSize: 14,
 
   async init() {
+    this.loadPreferences();
     await this.loadSessions();
   },
 
@@ -232,6 +234,31 @@ const bord = {
   togglePanel() { document.getElementById("tool-panel").classList.toggle("collapsed"); },
 
   setModel(m) { this.model = m; },
+
+  setTheme(theme) {
+    document.documentElement.setAttribute("data-theme", theme);
+    localStorage.setItem("bord-theme", theme);
+  },
+
+  changeFontSize(delta) {
+    this.fontSize = Math.max(10, Math.min(22, this.fontSize + delta));
+    document.documentElement.style.setProperty("--font-size", this.fontSize + "px");
+    localStorage.setItem("bord-font-size", this.fontSize);
+  },
+
+  loadPreferences() {
+    const theme = localStorage.getItem("bord-theme");
+    if (theme) {
+      document.documentElement.setAttribute("data-theme", theme);
+      const sel = document.getElementById("theme-select");
+      if (sel) sel.value = theme;
+    }
+    const fs = localStorage.getItem("bord-font-size");
+    if (fs) {
+      this.fontSize = parseInt(fs, 10);
+      document.documentElement.style.setProperty("--font-size", this.fontSize + "px");
+    }
+  },
 
   toggleSidebar() {
     const sb = document.getElementById("sidebar");
