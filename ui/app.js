@@ -349,6 +349,24 @@ const bord = {
     const text = input.value.trim();
     if (!text || this.isStreaming || this.activeTabIdx < 0) return;
     const tab = this.openTabs[this.activeTabIdx];
+
+    // Handle local slash commands
+    if (text.startsWith("/rename ")) {
+      const newName = text.slice(8).trim();
+      if (newName && !tab.id.startsWith("new-")) {
+        input.value = "";
+        const result = await pywebview.api.rename(tab.id, newName);
+        if (result.ok) {
+          tab.title = newName;
+          this.renderTabs();
+          this.renderChatHeader();
+          this.saveOpenTabs();
+          await this.loadSessions();
+        }
+      }
+      return;
+    }
+
     if (!tab.messages) tab.messages = [];
     tab.messages.push({role: "user", blocks: [{type: "text", text}]});
     input.value = ""; this.autoResize(input);
@@ -366,6 +384,26 @@ const bord = {
     this.switchTab(this.openTabs.length - 1);
     document.getElementById("msg-input").focus();
   },
+};
+
+// Permission dialog
+bord._permissionResolve = null;
+
+window.onBordPermission = function(data) {
+  const overlay = document.getElementById("permission-overlay");
+  document.getElementById("permission-tool").textContent = data.tool_name;
+  const inputStr = typeof data.tool_input === "object" ? JSON.stringify(data.tool_input, null, 2) : String(data.tool_input || "");
+  document.getElementById("permission-input").textContent = inputStr;
+  overlay.style.display = "flex";
+};
+
+bord.respondPermission = function(action) {
+  document.getElementById("permission-overlay").style.display = "none";
+  if (action === "allow_all") {
+    const tab = this.openTabs[this.activeTabIdx];
+    if (tab) { tab.bypass = true; this.updateBypassUI(); }
+  }
+  pywebview.api.respond_permission(action === "deny" ? "deny" : "allow", action === "allow_all");
 };
 
 window.onBordEvent = function(evt) {

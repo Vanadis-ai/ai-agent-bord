@@ -66,6 +66,19 @@
   </div>
 </div>
 
+<div id="permission-overlay" style="display:none">
+  <div id="permission-dialog">
+    <div id="permission-title">Permission Required</div>
+    <div id="permission-tool"></div>
+    <div id="permission-input"></div>
+    <div id="permission-buttons">
+      <button onclick="bord.respondPermission('allow')">Allow</button>
+      <button onclick="bord.respondPermission('allow_all')">Allow all (this session)</button>
+      <button onclick="bord.respondPermission('deny')">Deny</button>
+    </div>
+  </div>
+</div>
+
 <script src="app.js"></script>
 </body>
 </html>

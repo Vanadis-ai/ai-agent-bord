@@ -481,6 +481,66 @@ body {
 .tool-entry-body .error { color: var(--error); }
 .tool-entry-body .label { color: var(--text-dim); margin-bottom: 4px; }
 
+/* Permission overlay */
+#permission-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+#permission-dialog {
+  background: var(--sidebar-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 20px;
+  max-width: 500px;
+  width: 90%;
+}
+#permission-title {
+  font-size: calc(var(--font-size) + 2px);
+  font-weight: 600;
+  color: var(--accent);
+  margin-bottom: 12px;
+}
+#permission-tool {
+  font-size: var(--font-size);
+  color: var(--text);
+  margin-bottom: 8px;
+  font-weight: 500;
+}
+#permission-input {
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-size: calc(var(--font-size) - 2px);
+  color: var(--text-dim);
+  background: var(--code-bg);
+  padding: 8px;
+  border-radius: 4px;
+  max-height: 200px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin-bottom: 16px;
+}
+#permission-buttons {
+  display: flex;
+  gap: 8px;
+}
+#permission-buttons button {
+  flex: 1;
+  padding: 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  font-size: calc(var(--font-size) - 1px);
+  background: var(--tool-bg);
+  color: var(--text);
+}
+#permission-buttons button:first-child { background: var(--accent); color: #fff; border-color: var(--accent); }
+#permission-buttons button:last-child { color: var(--error); }
+#permission-buttons button:hover { opacity: 0.9; }
+
 /* Scrollbar */
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
