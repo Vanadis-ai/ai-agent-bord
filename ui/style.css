@@ -377,7 +377,7 @@ body {
   border-radius: 8px;
   color: var(--text);
   padding: 10px 14px;
-  font-size: 14px;
+  font-size: var(--font-size);
   font-family: inherit;
   resize: none;
   outline: none;

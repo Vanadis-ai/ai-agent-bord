@@ -13,6 +13,7 @@ const bord = {
   async init() {
     this.loadPreferences();
     await this.loadSessions();
+    this.restoreOpenTabs();
   },
 
   async loadSessions() {
@@ -60,6 +61,19 @@ const bord = {
     this.renderToolPanel();
     this.renderSessions();
     this.updateBypassUI();
+    this.saveOpenTabs();
+  },
+
+  refreshTabTitle() {
+    this.openTabs.forEach(tab => {
+      const s = this.sessions.find(s => s.id === tab.id);
+      if (s && s.title) {
+        tab.title = s.title;
+        tab.cwd = s.cwd || tab.cwd;
+      }
+    });
+    this.renderTabs();
+    this.renderChatHeader();
   },
 
   renderChatHeader() {
@@ -247,7 +261,7 @@ const bord = {
 
   togglePanel() { document.getElementById("tool-panel").classList.toggle("collapsed"); },
 
-  setModel(m) { this.model = m; },
+  setModel(m) { this.model = m; localStorage.setItem("bord-model", m); },
 
   setTheme(theme) {
     document.documentElement.setAttribute("data-theme", theme);
@@ -272,6 +286,39 @@ const bord = {
       this.fontSize = parseInt(fs, 10);
       document.documentElement.style.setProperty("--font-size", this.fontSize + "px");
     }
+    const model = localStorage.getItem("bord-model");
+    if (model) {
+      this.model = model;
+      const sel = document.getElementById("model-select");
+      if (sel) sel.value = model;
+    }
+  },
+
+  saveOpenTabs() {
+    const tabs = this.openTabs.map(t => ({id: t.id, title: t.title, cwd: t.cwd, bypass: t.bypass}));
+    localStorage.setItem("bord-open-tabs", JSON.stringify(tabs));
+    localStorage.setItem("bord-active-tab", String(this.activeTabIdx));
+  },
+
+  restoreOpenTabs() {
+    try {
+      const raw = localStorage.getItem("bord-open-tabs");
+      if (!raw) return;
+      const tabs = JSON.parse(raw);
+      if (!Array.isArray(tabs) || tabs.length === 0) return;
+      tabs.forEach(t => {
+        if (t.id && !t.id.startsWith("new-")) {
+          this.openTabs.push({id: t.id, title: t.title || "Untitled", messages: null, toolEntries: [], bypass: t.bypass || false, cwd: t.cwd || null});
+        }
+      });
+      const idx = parseInt(localStorage.getItem("bord-active-tab") || "0", 10);
+      if (idx >= 0 && idx < this.openTabs.length) {
+        this.switchTab(idx);
+        this.openTabs.forEach((tab, i) => {
+          if (tab.messages === null) this.loadMessages(tab.id, i);
+        });
+      }
+    } catch (e) { console.error("Failed to restore tabs", e); }
   },
 
   toggleSidebar() {
@@ -340,7 +387,9 @@ window.onBordEvent = function(evt) {
       if (bord.currentStreamText) { tab.messages.push({role: "assistant", blocks: [{type: "text", text: bord.currentStreamText}]}); bord.currentStreamText = ""; }
       if (evt.data.session_id && tab.id.startsWith("new-")) tab.id = evt.data.session_id;
       document.getElementById("send-btn").disabled = false;
-      bord.renderChat(); bord.loadSessions(); break;
+      bord.renderChat();
+      bord.loadSessions().then(() => bord.refreshTabTitle());
+      break;
     case "error":
       bord.isStreaming = false; bord.currentStreamText = "";
       document.getElementById("send-btn").disabled = false;
