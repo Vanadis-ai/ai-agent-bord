@@ -162,11 +162,13 @@ body {
   user-select: text;
   cursor: text;
 }
+#sessions-list, .tool-entry-header, .tool-entry-body {
+  font-size: calc(var(--font-size) - 1px);
+}
 .session-item {
   padding: 10px 12px;
   border-radius: 6px;
   cursor: pointer;
-  font-size: 13px;
   color: var(--text-dim);
   white-space: nowrap;
   overflow: hidden;
