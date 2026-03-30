@@ -133,30 +133,67 @@ class BordAPI:
             self._emit("error", {"message": err_msg})
 
     async def _auto_compact_and_retry(self, prompt, session_id, cwd, bypass, model):
-        """Compact the session and retry the query."""
-        logger.info("Auto-compacting session %s", session_id)
-        self._emit("assistant_text", {"text": "Compacting session context...\n", "session_id": session_id})
+        """Compact the session and retry the query with rate limit handling."""
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            logger.info("Auto-compacting session %s (attempt %d/%d)", session_id, attempt + 1, max_attempts)
+            self._emit("assistant_text", {
+                "text": f"Compacting session context (attempt {attempt + 1})...\n",
+                "session_id": session_id,
+            })
 
-        compact_opts = ClaudeAgentOptions(
-            resume=session_id,
-            continue_conversation=True,
-            model=model or "sonnet",
-        )
-        if cwd:
-            compact_opts.cwd = cwd
+            compact_opts = ClaudeAgentOptions(
+                resume=session_id,
+                continue_conversation=True,
+                model=model or "sonnet",
+            )
+            if cwd:
+                compact_opts.cwd = cwd
 
-        try:
-            async for msg in query(prompt="/compact", options=compact_opts):
-                if isinstance(msg, AssistantMessage):
-                    for block in msg.content:
-                        if isinstance(block, TextBlock) and "error" in block.text.lower():
-                            self._emit("error", {"message": f"Compact failed: {block.text}"})
-                            return
-            logger.info("Compact done, retrying query")
-            await self._stream_query(prompt, session_id, cwd, bypass, model)
-        except Exception as e:
-            logger.exception("Compact failed")
-            self._emit("error", {"message": f"Compact failed: {e}"})
+            try:
+                compact_ok = True
+                async for msg in query(prompt="/compact", options=compact_opts):
+                    if isinstance(msg, AssistantMessage):
+                        for block in msg.content:
+                            if isinstance(block, TextBlock):
+                                txt = block.text.lower()
+                                if "rate limit" in txt:
+                                    compact_ok = False
+                                    break
+                                if "error" in txt and "compact" in txt:
+                                    self._emit("error", {"message": f"Compact failed: {block.text}"})
+                                    return
+
+                if compact_ok:
+                    logger.info("Compact done, retrying query")
+                    await asyncio.sleep(2)
+                    await self._stream_query(prompt, session_id, cwd, bypass, model)
+                    return
+
+                wait = 15 * (attempt + 1)
+                logger.info("Rate limited, waiting %ds", wait)
+                self._emit("assistant_text", {
+                    "text": f"Rate limited, waiting {wait}s...\n",
+                    "session_id": session_id,
+                })
+                await asyncio.sleep(wait)
+
+            except Exception as e:
+                err = str(e)
+                if "rate limit" in err.lower():
+                    wait = 15 * (attempt + 1)
+                    logger.info("Rate limited (exception), waiting %ds", wait)
+                    self._emit("assistant_text", {
+                        "text": f"Rate limited, waiting {wait}s...\n",
+                        "session_id": session_id,
+                    })
+                    await asyncio.sleep(wait)
+                else:
+                    logger.exception("Compact failed")
+                    self._emit("error", {"message": f"Compact failed: {e}"})
+                    return
+
+        self._emit("error", {"message": "Compact failed after retries. Try again later."})
 
     def _emit(self, event_type, data):
         if self.window:
