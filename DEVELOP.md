@@ -1,97 +1,126 @@
 # Vanadis Bord -- Development Guide
 
+## Project Structure
+
+```
+bord/
+  bord.py            -- Python backend (BordAPI, streaming, main)
+  session_utils.py   -- Session JSONL parsing, custom title/model extraction
+  bord.spec          -- PyInstaller build spec (macOS + Linux)
+  requirements.txt   -- Python dependencies
+  ui/
+    index.html       -- Main HTML layout
+    style.css        -- Themes, layout, components
+    app.js           -- Core frontend logic (state, settings, sessions, tabs)
+    render.js        -- Rendering (chat, tools, markdown, events)
+  assets/
+    icon.png         -- App icon source (512x512)
+    icon.icns        -- macOS icon bundle
+  linux/
+    install.sh       -- Linux install script (app + .desktop entry)
+    uninstall.sh     -- Linux uninstall script
+    vanadis-bord.desktop -- Freedesktop .desktop template
+```
+
 ## Prerequisites
+
+### macOS
 
 ```bash
 pip3 install pywebview pystray pillow claude-agent-sdk pyinstaller
 ```
 
-## Project Structure
+### Linux (Ubuntu/Debian)
 
-```
-bord/
-  bord.py           -- Python backend (SDK, session management, events)
-  bord.spec         -- PyInstaller build spec
-  requirements.txt  -- Python dependencies
-  ui/
-    index.html      -- Main HTML layout
-    style.css       -- Themes, layout, components
-    app.js          -- Frontend logic (sessions, chat, tools, events)
-  assets/
-    icon.png        -- App icon source (512x512)
-    icon.icns       -- macOS icon bundle
+```bash
+# System dependencies for PyWebView (GTK + WebKit)
+sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-3.0 gir1.2-webkit2-4.1
+
+# Python packages
+pip3 install pywebview pystray pillow claude-agent-sdk pyinstaller
 ```
 
 ## Run in Development
 
 ```bash
-cd /Users/alter/Workspace/Vanadis/.code.nosync/Vanadis.AI/bord
+cd bord/
 python3 bord.py
 ```
 
 Changes to `ui/` files (HTML, CSS, JS) take effect on app restart.
-Changes to `bord.py` require restart.
 
-## Build macOS App
+## Build
 
 ```bash
 python3 -m PyInstaller bord.spec --noconfirm
 ```
 
-Output: `dist/Vanadis Bord.app` (~48 MB)
+Output:
+- macOS: `dist/Vanadis Bord.app`
+- Linux: `dist/Vanadis Bord/` (directory with executable)
 
 ## Install
 
+### macOS
+
 ```bash
 rm -rf ~/Applications/Vanadis\ Bord.app
 cp -R "dist/Vanadis Bord.app" ~/Applications/
-```
-
-## Launch
-
-```bash
 open ~/Applications/Vanadis\ Bord.app
 ```
 
-Or from Launchpad / Spotlight: search "Vanadis Bord".
+Launch: Launchpad / Spotlight -> "Vanadis Bord"
 
-## Full Rebuild Cycle (dev -> install)
+### Linux
 
 ```bash
-# Kill running instances
+bash linux/install.sh
+```
+
+This will:
+1. Build if not already built
+2. Copy to `~/.local/share/vanadis-bord/`
+3. Create `.desktop` entry in `~/.local/share/applications/`
+4. Update desktop database
+
+Launch: search "Vanadis Bord" in app launcher, or run `~/.local/share/vanadis-bord/Vanadis\ Bord`
+
+Pin to dock: right-click running app in taskbar -> "Pin to favorites" / "Add to panel"
+
+### Linux Uninstall
+
+```bash
+bash linux/uninstall.sh
+```
+
+## Full Rebuild Cycle
+
+### macOS
+
+```bash
 pkill -f "Vanadis Bord" 2>/dev/null
 pkill -f "claude.*stream-json" 2>/dev/null
-
-# Build
 python3 -m PyInstaller bord.spec --noconfirm
-
-# Install
 rm -rf ~/Applications/Vanadis\ Bord.app
 cp -R "dist/Vanadis Bord.app" ~/Applications/
-
-# Launch
 open ~/Applications/Vanadis\ Bord.app
 ```
 
-## Commit and Deploy
+### Linux
 
 ```bash
 pkill -f "Vanadis Bord" 2>/dev/null
 pkill -f "claude.*stream-json" 2>/dev/null
-git add -A
-git commit -m "description"
-git push origin main
 python3 -m PyInstaller bord.spec --noconfirm
-rm -rf ~/Applications/Vanadis\ Bord.app
-cp -R "dist/Vanadis Bord.app" ~/Applications/
-open ~/Applications/Vanadis\ Bord.app
+bash linux/install.sh
+~/.local/share/vanadis-bord/Vanadis\ Bord &
 ```
 
 ## Icon
 
 Source: `Vanadis.AI/graphics/vanadis-logo.png` (gold V on dark background).
 
-To regenerate icns from a new PNG:
+To regenerate icns from a new PNG (macOS only):
 
 ```bash
 python3 -c "
@@ -111,18 +140,21 @@ rm -rf assets/icon.iconset
 
 ## Architecture
 
-- **bord.py**: PyWebView window + JS bridge API. Async event loop for SDK queries.
-- **ui/app.js**: All frontend state and rendering. No framework, vanilla JS with DOM API.
+- **bord.py**: PyWebView window + JS bridge API. Each query runs in its own thread.
+- **session_utils.py**: JSONL parsing, custom title/model extraction (workaround for SDK limitations on large files).
+- **ui/app.js**: Core frontend state, settings, sessions, tabs. No framework, vanilla JS with DOM API.
+- **ui/render.js**: Chat rendering, markdown, tool panel, event handlers. Augments `bord` object from app.js.
 - **ui/style.css**: CSS variables for theming. 5 themes: dark, light, blue, sand, dark-sand.
-- **SDK**: `claude-agent-sdk` Python package. `query()` for streaming, `list_sessions()` / `get_session_messages()` for history.
+- **SDK**: `claude-agent-sdk` with `ClaudeSDKClient` for streaming + permission callbacks.
 
 ## Key Design Decisions
 
-- `bypassPermissions` mode by default (all tool operations allowed)
+- Permission modes: Bypass, Accept edits, Ask (with inline permission cards), Plan
 - Sessions are Claude Code native -- compatible with CLI sessions
+- Each query in its own thread -- sessions are independent, one can't block another
 - Auto-compact on "Prompt is too long" with retry and rate limit backoff
-- Input draft saved per tab on switch
-- Theme, font size, model, open tabs persisted in localStorage
+- Settings persisted in `~/.Vanadis/bord-settings.json` (cross-platform, survives reinstall)
+- Model auto-detected per session from JSONL
 - Child claude processes killed on app exit (atexit + SIGTERM)
 
 ## Bundle ID

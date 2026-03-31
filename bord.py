@@ -7,6 +7,7 @@ import logging
 import os
 import signal
 import threading
+import uuid
 from pathlib import Path
 
 import webview
@@ -14,22 +15,39 @@ import webview
 from claude_agent_sdk import (
     AssistantMessage,
     ClaudeAgentOptions,
-    PermissionMode,
+    ClaudeSDKClient,
+    HookMatcher,
+    PermissionResultAllow,
+    PermissionResultDeny,
     ResultMessage,
-    StreamEvent,
-    SystemMessage,
     TextBlock,
     ToolResultBlock,
     ToolUseBlock,
-    UserMessage,
+    delete_session,
     get_session_messages,
     list_sessions,
-    query,
     rename_session,
+)
+
+from session_utils import (
+    extract_content,
+    find_custom_title,
+    find_session_model,
+    find_session_tokens,
+    model_to_short,
+    parse_message,
 )
 
 logger = logging.getLogger("bord")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(message)s")
+
+SETTINGS_DIR = Path.home() / ".Vanadis"
+SETTINGS_FILE = SETTINGS_DIR / "bord-settings.json"
+
+
+async def _dummy_hook(input_data, tool_use_id, context):
+    """Required workaround: keeps stream open for can_use_tool callback."""
+    return {"continue_": True}
 
 
 class BordAPI:
@@ -37,30 +55,60 @@ class BordAPI:
 
     def __init__(self):
         self.window = None
-        self.loop = asyncio.new_event_loop()
-        self.thread = threading.Thread(target=self._run_loop, daemon=True)
-        self.thread.start()
+        self._perm_events = {}
+        self._perm_responses = {}
+        self._allowed_tools = {}
 
-    def _run_loop(self):
-        asyncio.set_event_loop(self.loop)
-        self.loop.run_forever()
+    # -- Permission handling --
 
-    def _run_async(self, coro):
-        return asyncio.run_coroutine_threadsafe(coro, self.loop)
+    async def _permission_handler(self, tool_name, tool_input, context):
+        tid = threading.current_thread().ident
+        allowed = self._allowed_tools.get(tid, set())
+        if tool_name in allowed:
+            return PermissionResultAllow()
+        perm_id = uuid.uuid4().hex[:8]
+        event = threading.Event()
+        self._perm_events[perm_id] = event
+        self._emit("permission_request", {
+            "id": perm_id, "tool_name": tool_name,
+            "tool_input": tool_input if isinstance(tool_input, dict) else str(tool_input),
+        })
+        await asyncio.get_event_loop().run_in_executor(None, event.wait, 300)
+        action = self._perm_responses.pop(perm_id, "deny")
+        self._perm_events.pop(perm_id, None)
+        if action == "allow":
+            return PermissionResultAllow()
+        if action == "allow_tool":
+            allowed.add(tool_name)
+            self._allowed_tools[tid] = allowed
+            return PermissionResultAllow()
+        if action == "bypass":
+            return PermissionResultAllow()
+        return PermissionResultDeny(message="User denied")
+
+    def respond_permission(self, perm_id, action):
+        self._perm_responses[perm_id] = action
+        event = self._perm_events.get(perm_id)
+        if event:
+            event.set()
+
+    # -- Sessions --
 
     def get_sessions(self, directory=None):
         try:
             sessions = list_sessions(directory=directory, limit=50)
-            return [
-                {
-                    "id": s.session_id,
-                    "title": s.custom_title or s.summary or s.first_prompt or "Untitled",
-                    "last_modified": s.last_modified,
-                    "cwd": s.cwd or "",
+            result = []
+            for s in sessions:
+                title = s.custom_title or find_custom_title(s.session_id)
+                if not title:
+                    title = s.summary or s.first_prompt or "Untitled"
+                result.append({
+                    "id": s.session_id, "title": title,
+                    "last_modified": s.last_modified, "cwd": s.cwd or "",
                     "tag": s.tag or "",
-                }
-                for s in sessions
-            ]
+                    "model": model_to_short(find_session_model(s.session_id)),
+                })
+            return result
         except Exception:
             logger.exception("Failed to list sessions")
             return {"error": "Failed to list sessions"}
@@ -70,147 +118,116 @@ class BordAPI:
             msgs = get_session_messages(session_id, directory=directory)
             result = []
             for m in msgs:
-                msg = m.message
                 blocks = []
-                role = _parse_message(msg, blocks)
+                role = parse_message(m.message, blocks)
                 if role and blocks:
                     result.append({"role": role, "blocks": blocks})
-            return result
+            tokens = 0
+            try:
+                tokens = find_session_tokens(session_id)
+            except Exception:
+                pass
+            return {"messages": result, "tokens": tokens}
         except Exception:
             logger.exception("Failed to get messages for session %s", session_id)
-            return {"error": "Failed to get messages"}
+            return {"error": "Failed to load"}
 
-    def send_message(self, prompt, session_id=None, cwd=None, bypass=False, model="sonnet"):
-        self._run_async(self._stream_query(prompt, session_id, cwd, bypass, model))
+    # -- Streaming (each query in its own thread via ClaudeSDKClient) --
+
+    def send_message(self, prompt, session_id=None, cwd=None, perm_mode="bypassPermissions", model="sonnet"):
+        threading.Thread(target=self._run_query, args=(prompt, session_id, cwd, perm_mode, model), daemon=True).start()
         return {"status": "started"}
 
-    async def _stream_query(self, prompt, session_id=None, cwd=None, bypass=False, model="sonnet"):
+    def _run_query(self, prompt, session_id, cwd, perm_mode, model):
+        tid = threading.current_thread().ident
+        self._allowed_tools[tid] = set()
+        try:
+            asyncio.run(self._stream_query(prompt, session_id, cwd, perm_mode, model))
+        except Exception as e:
+            logger.exception("Query thread failed: %s", e)
+            self._emit("error", {"message": str(e)})
+        finally:
+            self._allowed_tools.pop(tid, None)
+
+    async def _stream_query(self, prompt, session_id=None, cwd=None, perm_mode="bypassPermissions", model="sonnet"):
         is_resume = session_id and not session_id.startswith("new-")
-        opts = ClaudeAgentOptions(model=model or "sonnet")
+        opts = ClaudeAgentOptions(model=model or "sonnet", permission_mode=perm_mode)
         if is_resume:
             opts.resume = session_id
             opts.continue_conversation = True
-            if cwd:
-                opts.cwd = cwd
+            if cwd: opts.cwd = cwd
         else:
             opts.cwd = cwd or os.path.expanduser("~")
-        if bypass:
-            opts.permission_mode = "bypassPermissions"
-        else:
-            opts.permission_mode = "bypassPermissions"
+        if perm_mode not in ("bypassPermissions", "plan"):
+            opts.can_use_tool = self._permission_handler
+            opts.hooks = {"PreToolUse": [HookMatcher(matcher=None, hooks=[_dummy_hook])]}
 
-        logger.info("Starting query: session=%s cwd=%s bypass=%s", session_id, cwd, bypass)
-
+        logger.info("Query: session=%s mode=%s model=%s", session_id, perm_mode, model)
         try:
-            async for msg in query(prompt=prompt, options=opts):
-                if isinstance(msg, AssistantMessage):
-                    sid = getattr(msg, "session_id", "")
-                    for block in msg.content:
-                        if isinstance(block, TextBlock):
-                            if "prompt is too long" in block.text.lower() and is_resume:
-                                logger.info("Prompt too long, auto-compacting")
-                                await self._auto_compact_and_retry(prompt, session_id, cwd, bypass, model)
-                                return
-                            self._emit("assistant_text", {"text": block.text, "session_id": sid})
-                        elif isinstance(block, ToolUseBlock):
-                            self._emit("tool_use", {
-                                "id": block.id,
-                                "name": block.name,
-                                "input": block.input if isinstance(block.input, dict) else str(block.input),
-                            })
-                        elif isinstance(block, ToolResultBlock):
-                            content = _extract_content(block.content)
-                            self._emit("tool_result", {
-                                "tool_use_id": block.tool_use_id,
-                                "content": content[:5000],
-                                "is_error": block.is_error,
-                            })
-                elif isinstance(msg, ResultMessage):
-                    sid = getattr(msg, "session_id", "")
-                    cost = getattr(msg, "cost_usd", 0)
-                    self._emit("result", {"session_id": sid, "cost": cost})
-                    logger.info("Query completed: session=%s cost=%s", sid, cost)
-        except Exception as e:
-            err_msg = str(e)
-            logger.exception("Query failed: %s", err_msg)
-            self._emit("error", {"message": err_msg})
-
-    async def _auto_compact_and_retry(self, prompt, session_id, cwd, bypass, model):
-        """Compact the session and retry the query with rate limit handling."""
-        max_attempts = 3
-        for attempt in range(max_attempts):
-            logger.info("Auto-compacting session %s (attempt %d/%d)", session_id, attempt + 1, max_attempts)
-            self._emit("assistant_text", {
-                "text": f"Compacting session context (attempt {attempt + 1})...\n",
-                "session_id": session_id,
-            })
-
-            compact_opts = ClaudeAgentOptions(
-                resume=session_id,
-                continue_conversation=True,
-                model=model or "sonnet",
-            )
-            if cwd:
-                compact_opts.cwd = cwd
-
-            try:
-                compact_ok = True
-                async for msg in query(prompt="/compact", options=compact_opts):
+            async with ClaudeSDKClient(opts) as client:
+                await client.query(prompt)
+                async for msg in client.receive_response():
                     if isinstance(msg, AssistantMessage):
+                        sid = getattr(msg, "session_id", "")
                         for block in msg.content:
                             if isinstance(block, TextBlock):
-                                txt = block.text.lower()
-                                if "rate limit" in txt:
-                                    compact_ok = False
-                                    break
-                                if "error" in txt and "compact" in txt:
-                                    self._emit("error", {"message": f"Compact failed: {block.text}"})
+                                if "prompt is too long" in block.text.lower() and is_resume:
+                                    await self._auto_compact(prompt, session_id, cwd, perm_mode, model)
                                     return
+                                self._emit("assistant_text", {"text": block.text, "session_id": sid})
+                            elif isinstance(block, ToolUseBlock):
+                                self._emit("tool_use", {"id": block.id, "name": block.name,
+                                    "input": block.input if isinstance(block.input, dict) else str(block.input)})
+                            elif isinstance(block, ToolResultBlock):
+                                self._emit("tool_result", {"tool_use_id": block.tool_use_id,
+                                    "content": extract_content(block.content)[:5000], "is_error": block.is_error})
+                    elif isinstance(msg, ResultMessage):
+                        sid = getattr(msg, "session_id", "")
+                        cost = getattr(msg, "total_cost_usd", 0) or getattr(msg, "cost_usd", 0)
+                        usage = getattr(msg, "usage", None)
+                        tokens = 0
+                        if usage and isinstance(usage, dict):
+                            tokens = sum(usage.get(k, 0) for k in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"))
+                        self._emit("result", {"session_id": sid, "cost": cost, "tokens": tokens})
+        except Exception as e:
+            logger.exception("Query failed: %s", e)
+            self._emit("error", {"message": str(e)})
 
-                if compact_ok:
-                    logger.info("Compact done, retrying query")
+    async def _auto_compact(self, prompt, session_id, cwd, perm_mode, model):
+        for attempt in range(3):
+            self._emit("assistant_text", {"text": f"Compacting ({attempt + 1}/3)...\n", "session_id": session_id})
+            opts = ClaudeAgentOptions(resume=session_id, continue_conversation=True, model=model or "sonnet",
+                                     permission_mode="bypassPermissions")
+            if cwd: opts.cwd = cwd
+            try:
+                async with ClaudeSDKClient(opts) as client:
+                    await client.query("/compact")
+                    ok = True
+                    async for msg in client.receive_response():
+                        if isinstance(msg, AssistantMessage):
+                            for b in msg.content:
+                                if isinstance(b, TextBlock) and "rate limit" in b.text.lower():
+                                    ok = False; break
+                if ok:
                     await asyncio.sleep(2)
-                    await self._stream_query(prompt, session_id, cwd, bypass, model)
+                    await self._stream_query(prompt, session_id, cwd, perm_mode, model)
                     return
-
-                wait = 15 * (attempt + 1)
-                logger.info("Rate limited, waiting %ds", wait)
-                self._emit("assistant_text", {
-                    "text": f"Rate limited, waiting {wait}s...\n",
-                    "session_id": session_id,
-                })
-                await asyncio.sleep(wait)
-
             except Exception as e:
-                err = str(e)
-                if "rate limit" in err.lower():
-                    wait = 15 * (attempt + 1)
-                    logger.info("Rate limited (exception), waiting %ds", wait)
-                    self._emit("assistant_text", {
-                        "text": f"Rate limited, waiting {wait}s...\n",
-                        "session_id": session_id,
-                    })
-                    await asyncio.sleep(wait)
-                else:
-                    logger.exception("Compact failed")
-                    self._emit("error", {"message": f"Compact failed: {e}"})
-                    return
+                if "rate limit" not in str(e).lower():
+                    self._emit("error", {"message": f"Compact failed: {e}"}); return
+            self._emit("assistant_text", {"text": f"Rate limited, waiting {15*(attempt+1)}s...\n", "session_id": session_id})
+            await asyncio.sleep(15 * (attempt + 1))
+        self._emit("error", {"message": "Compact failed after retries."})
 
-        self._emit("error", {"message": "Compact failed after retries. Try again later."})
+    # -- Utilities --
 
     def _emit(self, event_type, data):
         if self.window:
-            payload = json.dumps({"type": event_type, "data": data})
-            self.window.evaluate_js(f"window.onBordEvent({payload})")
+            self.window.evaluate_js(f"window.onBordEvent({json.dumps({'type': event_type, 'data': data})})")
 
     def pick_directory(self) -> str | None:
-        result = self.window.create_file_dialog(
-            webview.FOLDER_DIALOG,
-            directory=os.path.expanduser("~"),
-        )
-        if result and len(result) > 0:
-            return result[0]
-        return None
+        result = self.window.create_file_dialog(webview.FOLDER_DIALOG, directory=os.path.expanduser("~"))
+        return result[0] if result and len(result) > 0 else None
 
     def rename(self, session_id, new_name):
         try:
@@ -220,82 +237,33 @@ class BordAPI:
             logger.exception("Failed to rename session %s", session_id)
             return {"error": "Failed to rename"}
 
+    def delete(self, session_id):
+        try:
+            delete_session(session_id)
+            return {"ok": True}
+        except Exception:
+            logger.exception("Failed to delete session %s", session_id)
+            return {"error": "Failed to delete"}
 
-def _parse_message(msg: object, blocks: list) -> str | None:
-    """Parse message into blocks list. Handles both typed SDK objects and raw dicts."""
-    if isinstance(msg, (UserMessage, AssistantMessage)):
-        role = "user" if isinstance(msg, UserMessage) else "assistant"
-        for b in msg.content:
-            _parse_block(b, blocks)
-        return role
-    if isinstance(msg, dict):
-        role = msg.get("role", "")
-        if role not in ("user", "assistant"):
-            return None
-        content = msg.get("content", [])
-        if isinstance(content, str):
-            blocks.append({"type": "text", "text": content})
-            return role
-        if isinstance(content, list):
-            for b in content:
-                _parse_block(b, blocks)
-        return role
-    return None
+    def load_settings(self):
+        try:
+            return json.loads(SETTINGS_FILE.read_text(encoding="utf-8")) if SETTINGS_FILE.exists() else {}
+        except Exception:
+            return {}
 
-
-def _parse_block(b: object, blocks: list) -> None:
-    """Parse a single content block (typed or dict) into blocks list."""
-    if isinstance(b, TextBlock):
-        blocks.append({"type": "text", "text": b.text})
-    elif isinstance(b, ToolUseBlock):
-        blocks.append({
-            "type": "tool_use", "id": b.id, "name": b.name,
-            "input": b.input if isinstance(b.input, dict) else str(b.input),
-        })
-    elif isinstance(b, ToolResultBlock):
-        blocks.append({
-            "type": "tool_result", "tool_use_id": b.tool_use_id,
-            "content": _extract_content(b.content)[:2000], "is_error": b.is_error,
-        })
-    elif isinstance(b, dict):
-        btype = b.get("type", "")
-        if btype == "text":
-            blocks.append({"type": "text", "text": b.get("text", "")})
-        elif btype == "tool_use":
-            blocks.append({
-                "type": "tool_use", "id": b.get("id", ""),
-                "name": b.get("name", ""), "input": b.get("input", {}),
-            })
-        elif btype == "tool_result":
-            blocks.append({
-                "type": "tool_result", "tool_use_id": b.get("tool_use_id", ""),
-                "content": _extract_content(b.get("content", ""))[:2000],
-                "is_error": b.get("is_error", False),
-            })
-
-
-def _extract_content(content):
-    if isinstance(content, list):
-        return "\n".join(
-            bl.get("text", "") if isinstance(bl, dict) else str(bl)
-            for bl in content
-        )
-    if not isinstance(content, str):
-        return str(content)
-    return content
+    def save_settings(self, data):
+        try:
+            SETTINGS_DIR.mkdir(parents=True, exist_ok=True)
+            SETTINGS_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+            return {"ok": True}
+        except Exception:
+            return {"error": "Failed to save settings"}
 
 
 def _cleanup() -> None:
-    """Kill all child claude processes on exit."""
     import subprocess
     try:
-        result = subprocess.run(
-            ["pkill", "-f", "claude.*stream-json"],
-            capture_output=True,
-            timeout=5,
-        )
-        if result.returncode == 0:
-            logger.info("Cleaned up child claude processes")
+        subprocess.run(["pkill", "-f", "claude.*stream-json"], capture_output=True, timeout=5)
     except Exception:
         pass
 
@@ -303,17 +271,10 @@ def _cleanup() -> None:
 def main() -> None:
     atexit.register(_cleanup)
     signal.signal(signal.SIGTERM, lambda *_: (_cleanup(), os._exit(0)))
-
     api = BordAPI()
-    ui_dir = Path(__file__).parent / "ui"
-    index_path = ui_dir / "index.html"
     window = webview.create_window(
-        "Vanadis Bord",
-        url=str(index_path),
-        js_api=api,
-        width=1400,
-        height=900,
-        min_size=(900, 600),
+        "Vanadis Bord", url=str(Path(__file__).parent / "ui" / "index.html"), js_api=api,
+        width=1400, height=900, min_size=(900, 600),
     )
     api.window = window
     webview.start(debug=False)

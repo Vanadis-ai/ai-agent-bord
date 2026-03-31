@@ -14,6 +14,7 @@
   <div id="sessions-list"></div>
   <div id="new-session" onclick="bord.newSession()">+ New Session</div>
 </div>
+<div class="resize-h" id="resize-sidebar"></div>
 
 <div id="main">
   <div id="tabs">
@@ -34,7 +35,6 @@
       </select>
       <span class="toolbar-btn" onclick="bord.changeFontSize(-1)" title="Decrease font">A-</span>
       <span class="toolbar-btn" onclick="bord.changeFontSize(1)" title="Increase font">A+</span>
-      <span class="toolbar-btn" id="bp-btn" onclick="bord.toggleBypass()" title="Bypass permissions">BP</span>
       <span class="toolbar-btn" onclick="bord.togglePanel()" title="Toggle tool panel">T</span>
     </div>
   </div>
@@ -50,12 +50,23 @@
           <p>Select a session or create a new one</p>
         </div>
       </div>
+      <div id="token-bar">
+        <span id="token-count"></span>
+        <select id="perm-mode" onchange="bord.setPermMode(this.value)" title="Permission mode">
+          <option value="bypassPermissions">Bypass</option>
+          <option value="acceptEdits">Accept edits</option>
+          <option value="default">Ask</option>
+          <option value="plan">Plan</option>
+        </select>
+      </div>
+      <div class="resize-v" id="resize-input"></div>
       <div id="input-area">
         <textarea id="msg-input" placeholder="Type a message..." rows="3"
           onkeydown="bord.handleKey(event)" oninput="bord.autoResize(this)"></textarea>
         <button id="send-btn" onclick="bord.sendMessage()">Send</button>
       </div>
     </div>
+    <div class="resize-h" id="resize-tools"></div>
     <div id="tool-panel">
       <div id="tool-panel-header">
         <span>Tool Activity</span>
@@ -66,19 +77,8 @@
   </div>
 </div>
 
-<div id="permission-overlay" style="display:none">
-  <div id="permission-dialog">
-    <div id="permission-title">Permission Required</div>
-    <div id="permission-tool"></div>
-    <div id="permission-input"></div>
-    <div id="permission-buttons">
-      <button onclick="bord.respondPermission('allow')">Allow</button>
-      <button onclick="bord.respondPermission('allow_all')">Allow all (this session)</button>
-      <button onclick="bord.respondPermission('deny')">Deny</button>
-    </div>
-  </div>
-</div>
-
 <script src="app.js"></script>
+<script src="resize.js"></script>
+<script src="render.js"></script>
 </body>
 </html>

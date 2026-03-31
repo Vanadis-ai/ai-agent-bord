@@ -1,6 +1,7 @@
-"""PyInstaller spec for Vanadis Bord macOS app."""
+"""PyInstaller spec for Vanadis Bord (macOS + Linux)."""
 
 import os
+import platform
 
 block_cipher = None
 here = os.path.dirname(os.path.abspath(SPEC))
@@ -45,7 +46,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='assets/icon.icns',
+    icon='assets/icon.icns' if platform.system() == 'Darwin' else 'assets/icon.png',
 )
 
 coll = COLLECT(
@@ -59,15 +60,17 @@ coll = COLLECT(
     name='Vanadis Bord',
 )
 
-app = BUNDLE(
-    coll,
-    name='Vanadis Bord.app',
-    icon='assets/icon.icns',
-    bundle_identifier='ai.vanadis.bord',
-    info_plist={
-        'CFBundleDisplayName': 'Vanadis Bord',
-        'CFBundleShortVersionString': '0.1.0',
-        'NSHighResolutionCapable': True,
-        'LSMinimumSystemVersion': '12.0',
-    },
-)
+# macOS app bundle (skipped on Linux)
+if platform.system() == 'Darwin':
+    app = BUNDLE(
+        coll,
+        name='Vanadis Bord.app',
+        icon='assets/icon.icns',
+        bundle_identifier='ai.vanadis.bord',
+        info_plist={
+            'CFBundleDisplayName': 'Vanadis Bord',
+            'CFBundleShortVersionString': '0.1.0',
+            'NSHighResolutionCapable': True,
+            'LSMinimumSystemVersion': '12.0',
+        },
+    )
