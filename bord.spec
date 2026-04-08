@@ -17,6 +17,13 @@ a = Analysis(
     hiddenimports=[
         'webview',
         'claude_agent_sdk',
+        'gi',
+        'gi.repository.Gtk',
+        'gi.repository.Gdk',
+        'gi.repository.GLib',
+        'gi.repository.GObject',
+        'gi.repository.WebKit2',
+        'gi.repository.Soup',
     ],
     hookspath=[],
     hooksconfig={},
@@ -30,12 +37,14 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
+_exe_name = 'Vanadis Bord' if platform.system() == 'Darwin' else 'vanadis-bord'
+
 exe = EXE(
     pyz,
     a.scripts,
     [],
     exclude_binaries=True,
-    name='Vanadis Bord',
+    name=_exe_name,
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -57,7 +66,7 @@ coll = COLLECT(
     strip=False,
     upx=False,
     upx_exclude=[],
-    name='Vanadis Bord',
+    name='Vanadis Bord' if platform.system() == 'Darwin' else 'vanadis-bord',
 )
 
 # macOS app bundle (skipped on Linux)

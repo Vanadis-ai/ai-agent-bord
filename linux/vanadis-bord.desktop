@@ -1,8 +1,8 @@
 [Desktop Entry]
 Name=Vanadis Bord
 Comment=Desktop AI chat application
-Exec=$HOME/.local/share/vanadis-bord/Vanadis Bord
-Icon=$HOME/.local/share/vanadis-bord/icon.png
+Exec=$HOME/.local/share/vanadis-bord/vanadis-bord
+Icon=vanadis-bord
 Terminal=false
 Type=Application
 Categories=Development;Utility;
